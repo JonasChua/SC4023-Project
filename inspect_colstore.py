@@ -1,6 +1,4 @@
 """
-Helper to inspect the on-disk column store.
-
 Usage:
   python inspect_colstore.py              # summary + first 10 rows
   python inspect_colstore.py -n 20        # first 20 rows
@@ -84,51 +82,48 @@ def read_column(colstore_path: Path, filename: str, fmt: str) -> list:
     return out
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description="Inspect column store contents")
-    ap.add_argument("-n", "--rows", type=int, default=10, help="Number of rows to print (0 = none)")
-    ap.add_argument("--stats", action="store_true", help="Print only summary and min/max, no row dump")
-    args = ap.parse_args()
-
-    if not COLSTORE_DIR.exists():
-        print(f"Colstore not found: {COLSTORE_DIR}")
+def run_inspect(colstore_path: Path | None = None, rows: int = 10, stats: bool = False) -> None:
+    """Inspect column store; can be called from main.py with custom path and options."""
+    path = colstore_path if colstore_path is not None else COLSTORE_DIR
+    if not path.exists():
+        print(f"Colstore not found: {path}")
         print("Run build_colstore.py first.")
         sys.exit(1)
 
     # Row count from first column
-    year_path = COLSTORE_DIR / "year.i16"
+    year_path = path / "year.i16"
     if not year_path.exists():
-        print("Column files not found in", COLSTORE_DIR)
+        print("Column files not found in", path)
         sys.exit(1)
     n_rows = year_path.stat().st_size // struct.calcsize(FMT_YEAR)
 
     # Summary
     print("=== Column store summary ===")
-    print(f"Directory: {COLSTORE_DIR}")
+    print(f"Directory: {path}")
     print(f"Row count: {n_rows:,}")
     print()
     print("Column files:")
     for name, filename, fmt in COLUMN_FILES:
-        path = COLSTORE_DIR / filename
-        if path.exists():
-            size = path.stat().st_size
+        fpath = path / filename
+        if fpath.exists():
+            size = fpath.stat().st_size
             print(f"  {filename}: {size:,} bytes")
     print()
     # Dictionaries
     for d in ["town", "flat_model", "block"]:
-        L = load_dict(COLSTORE_DIR, d)
+        L = load_dict(path, d)
         if L:
             print(f"  dict_{d}.csv: {len(L)} entries")
     print()
 
-    if args.stats or args.rows <= 0:
-        if args.stats:
+    if stats or rows <= 0:
+        if stats:
             print("=== Numeric stats (min / max) ===")
             for name, filename, fmt in COLUMN_FILES:
-                path = COLSTORE_DIR / filename
-                if not path.exists():
+                fpath = path / filename
+                if not fpath.exists():
                     continue
-                vals = read_column(COLSTORE_DIR, filename, fmt)
+                vals = read_column(path, filename, fmt)
                 if not vals:
                     continue
                 if isinstance(vals[0], float):
@@ -138,20 +133,20 @@ def main() -> None:
         return
 
     # Load dictionaries for decoded view
-    town_dec = load_dict(COLSTORE_DIR, "town")
-    flat_dec = load_dict(COLSTORE_DIR, "flat_model")
-    block_dec = load_dict(COLSTORE_DIR, "block")
+    town_dec = load_dict(path, "town")
+    flat_dec = load_dict(path, "flat_model")
+    block_dec = load_dict(path, "block")
 
     # Load columns (only as many as we need for display)
-    n_show = min(args.rows, n_rows)
+    n_show = min(rows, n_rows)
     cols = {}
     for name, filename, fmt in COLUMN_FILES:
-        path = COLSTORE_DIR / filename
-        if not path.exists():
+        fpath = path / filename
+        if not fpath.exists():
             continue
         size = struct.calcsize(fmt)
         vals = []
-        with open(path, "rb") as f:
+        with open(fpath, "rb") as f:
             for _ in range(n_show):
                 b = f.read(size)
                 if len(b) < size:
@@ -180,6 +175,14 @@ def main() -> None:
         rp = cols["resale_price"][i]
         print(f"{i:>5} | {cols['year'][i]:>4} | {cols['month'][i]:>2} | {town_s:<18} | {fa:>6.1f} | {rp:>12} | {cols['lease_year'][i]:>5} | {block_s:<8} | {flat_s}")
     print()
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Inspect column store contents")
+    ap.add_argument("-n", "--rows", type=int, default=10, help="Number of rows to print (0 = none)")
+    ap.add_argument("--stats", action="store_true", help="Print only summary and min/max, no row dump")
+    args = ap.parse_args()
+    run_inspect(COLSTORE_DIR, rows=args.rows, stats=args.stats)
 
 
 if __name__ == "__main__":
