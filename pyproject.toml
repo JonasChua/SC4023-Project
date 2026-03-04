@@ -1,0 +1,7 @@
+[project]
+name = "sc4023-project"
+version = "0.1.0"
+description = "SC4023 Project"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []
