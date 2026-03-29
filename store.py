@@ -2,7 +2,8 @@ from ast import literal_eval
 from collections.abc import Callable, Mapping
 from csv import DictReader
 from pathlib import Path
-from typing import Any, Literal
+from time import perf_counter
+from typing import Any, Literal, Sequence
 
 from column import FloatColumn, StringColumn, UnsignedCharColumn, UnsignedShortColumn
 from constants import BLOCK_SIZE, MONTH_ABBR, RAW_CSV
@@ -14,21 +15,25 @@ ColumnType = UnsignedCharColumn | UnsignedShortColumn | FloatColumn | StringColu
 class ColumnStore:
     def __init__(
         self,
-        type: Literal["basic", "compressed", "zone map compressed"],
+        types: Sequence[Literal["basic", "compressed", "zone map", "indexed"]],
         colstore_path: Path,
         columns: Mapping[str, ColumnType],
     ) -> None:
         self.colstore_path = colstore_path
         self.columns = columns
-        self.type = type
+        self.types = types
         self._cache: dict[tuple[str, int], list] = {}
+        self._composite_index: dict[tuple[Any, Any, Any], list[int]] = {}
         self._file_read_counters: dict[str, int] = {
             col.name: 0 for col in columns.values()
         }
-
-        self._initialize_column_files()
+        start = perf_counter()
+        self._initialise_column_files()
         self._load_compression_mappings()
-        self._initialize_zone_maps()
+        self._initialise_zone_maps()
+        self._initialise_composite_index()
+        self.initialisation_time = perf_counter() - start
+        self.query_execution_time = 0.0
 
     @property
     def file_read_count(self) -> dict[str, int]:
@@ -69,9 +74,9 @@ class ColumnStore:
 
         return True
 
-    def _initialize_column_files(self) -> None:
+    def _initialise_column_files(self) -> None:
         """
-        Initialize column files if they don't exist.
+        Initialise column files if they don't exist.
         """
         if self._check_columns_exist():
             return
@@ -98,11 +103,18 @@ class ColumnStore:
                         _, month = self._parse_month(month_str)
                         value = month
 
-                    else:
+                    elif column.name in {
+                        "floor_area_sqm",
+                        "lease_commence_date",
+                        "resale_price",
+                    }:
                         try:
                             value = literal_eval(row[column.name])
-                        except ValueError, SyntaxError:
-                            value = row[column.name]
+                        except ValueError:
+                            value = 0
+
+                    else:
+                        value = row[column.name]
 
                     if column.enable_compression_map:
                         value = column.update_compression_mapping(value)  # type: ignore
@@ -112,8 +124,8 @@ class ColumnStore:
         for column_file in column_files.values():
             column_file.close()
 
-        if self.type == "basic":
-            print("Basic column store initialized.")
+        if "basic" in self.types:
+            print("Basic column store initialised.")
             return
 
         # Write mapping files for compressed columns
@@ -121,12 +133,15 @@ class ColumnStore:
             if column.enable_compression_map:
                 map_writer(self.colstore_path, column.name, column._compression_map)
 
-        print("Compressed column store initialized with mappings.")
+        print("Compressed column store initialised with mappings.")
 
     def _load_compression_mappings(self) -> None:
         """
         Load mapping files for compressed columns.
         """
+        if "compressed" not in self.types:
+            return
+
         for column in self.columns.values():
             if not column.enable_compression_map:
                 continue
@@ -134,10 +149,13 @@ class ColumnStore:
             mapping = map_loader(self.colstore_path, column.name)
             column._compression_map = {v: k for k, v in mapping.items()}
 
-    def _initialize_zone_maps(self) -> None:
+    def _initialise_zone_maps(self) -> None:
         """
-        Initialize zone maps for all columns if enabled.
+        Initialise zone maps for all columns if enabled.
         """
+        if "zone map" not in self.types:
+            return
+
         for column in self.columns.values():
             if not column.enable_zone_map:
                 continue
@@ -150,6 +168,42 @@ class ColumnStore:
                     break
 
                 column._zone_map.append((min(block_values), max(block_values)))
+
+    def _initialise_composite_index(self) -> None:
+        """
+        Initialise a composite index mapping (year, month, town) to row indices.
+        """
+        if "indexed" not in self.types:
+            return
+
+        year_col = self.columns.get("year")
+        month_col = self.columns.get("month")
+        town_col = self.columns.get("town")
+
+        if not (year_col and month_col and town_col):
+            return
+
+        years = []
+        for block_index in range(self.get_block_count(year_col)):
+            years.extend(self._read_column(year_col, block_index, disable_cache=True))
+
+        months = []
+        for block_index in range(self.get_block_count(month_col)):
+            months.extend(self._read_column(month_col, block_index, disable_cache=True))
+
+        towns = []
+        for block_index in range(self.get_block_count(town_col)):
+            towns.extend(self._read_column(town_col, block_index, disable_cache=True))
+
+        for row_index, (y, m, t) in enumerate(zip(years, months, towns)):
+            key = (y, m, t)
+            self._composite_index.setdefault(key, []).append(row_index)
+
+    def query_composite_index(self, year: Any, month: Any, town: Any) -> list[int]:
+        """
+        Retrieve pre-filtered row indices from the composite index.
+        """
+        return self._composite_index.get((year, month, town), [])
 
     def clear_cache(self, column_name: str | None = None) -> None:
         """
@@ -245,7 +299,6 @@ class ColumnStore:
         if not disable_cache:
             self._file_read_counters[column.name] += 1
             self._cache[(column.name, block_index)] = values
-            # print(f"Read block {block_index} of column '{column.name}' from disk")
 
         return values
 
@@ -314,7 +367,24 @@ class ColumnStore:
     def print_summary(self) -> None:
         total_block = 0
         total_read = 0
-        print(f"{f' {self.type.title()} Column Store ':{'='}^40}")
+        print(f"{' Column Store Summary ':{'='}^40}")
+        print(f"{'Compression:':<15}{'On' if 'compressed' in self.types else 'Off'}")
+        print(f"{'Zone Maps:':<15}{'On' if 'zone map' in self.types else 'Off'}")
+        print(
+            f"{'Indexed:':<15}{'(year, month, town)' if 'indexed' in self.types else 'Off'}\n"
+        )
+
+        # Print timing summary
+        print(f"{'Phase':<20}{'Time (s)':>20}")
+        print(f"{'-' * 40}")
+        print(f"{'Initialisation':<20}{self.initialisation_time:>20.3f}")
+        print(f"{'Query Execution':<20}{self.query_execution_time:>20.3f}")
+        print(f"{'-' * 40}")
+        print(
+            f"{'Total':<20}{self.initialisation_time + self.query_execution_time:>20.3f}\n"
+        )
+
+        # Print column summary
         print(f"{'Column':<20}{'Blocks':>10}{'Read':>10}")
         print(f"{'-' * 40}")
         for column in self.columns.values():
@@ -329,4 +399,5 @@ class ColumnStore:
             total_read += read_count
 
         print(f"{'-' * 40}")
-        print(f"{'Total':<20}{total_block:>10}{total_read:>10}\n")
+        print(f"{'Total':<20}{total_block:>10}{total_read:>10}")
+        print(f"{'=' * 40}\n")

@@ -1,4 +1,5 @@
 from csv import DictWriter
+from time import perf_counter
 from typing import Any
 
 from constants import DIGIT_TO_TOWN, PROJECT_ROOT
@@ -151,6 +152,7 @@ class QueryEngine:
         """
         Execute the query based on the matriculation number and store results.
         """
+        start = perf_counter()
         target_year = self.query.target_year
         start_month = self.query.start_month
         town_names = self.query.town_names
@@ -160,9 +162,30 @@ class QueryEngine:
             # Number of consecutive months to consider for each x (1 to 8)
             for x in range(1, 9):
                 end_month = self.query.get_end_month(start_month, x)
-                indices = self.filter_year_index(target_year)
-                indices = self.filter_month_index(start_month, end_month, indices)
-                indices = self.filter_town_index(town_names, indices)
+                if "indexed" in self.colstore.types:
+                    indices = []
+                    town_col = self.colstore.columns["town"]
+                    for month in range(start_month, end_month + 1):
+                        for town in town_names:
+                            if town_col.enable_compression_map:
+                                town_id = town_col.map_value(town, -1)
+                                if town_id == -1:
+                                    print(f"Unknown town: {town}")
+                                    continue
+
+                            else:
+                                town_id = town
+
+                            indices.extend(
+                                self.colstore.query_composite_index(
+                                    target_year, month, town_id
+                                )
+                            )
+                else:
+                    indices = self.filter_year_index(target_year)
+                    indices = self.filter_month_index(start_month, end_month, indices)
+                    indices = self.filter_town_index(town_names, indices)
+
                 indices = self.filter_minimum_floor_area_index(y, indices)
                 best_index, min_ppm = self.select_minimum_price_per_floor_area(indices)
                 row_data = (
@@ -171,6 +194,8 @@ class QueryEngine:
                 self.results[(x, y)] = (
                     {**row_data, "price_per_sqm": round(min_ppm)} if row_data else None
                 )
+
+        self.colstore.query_execution_time = perf_counter() - start
 
     def export_results(self) -> None:
         """
