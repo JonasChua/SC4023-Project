@@ -316,20 +316,29 @@ class ColumnStore:
         matching_indices = []
         block_indices = None
 
+        # 1. CONVERT TO SET ONCE, OUTSIDE THE LOOP
+        if indices is not None:
+            set_indices = set(indices)
+        else:
+            set_indices = None
+
         for block_index in range(self.get_block_count(column)):
-            # Check zone map to skip blocks that cannot satisfy the predicate
+            # Check zone map to skip blocks...
             if (
                 column.enable_zone_map
                 and predicate
                 and not self._match_zone_map(column, block_index, predicate)
             ):
                 continue
-
-            # If indices is provided, determine which indices fall within the current block for pre-filtering
-            if indices is not None:
+                
+            # 2. USE THE PRE-MADE SET FOR INSTANT INTERSECTION
+            if set_indices is not None:
                 block_start = block_index * rows_per_block
                 block_end = block_start + rows_per_block
-                block_indices = set(i for i in indices if block_start <= i < block_end)
+                
+                # Notice we are using set_indices here!
+                block_indices = set(range(block_start, block_end)).intersection(set_indices)
+                
                 if not block_indices:
                     continue
 
@@ -363,6 +372,85 @@ class ColumnStore:
             )
 
         return block_values[within_block_index]
+
+    def return_summary(self, type: str) -> dict[str, Any]:
+        total_block = 0
+        total_read = 0
+
+        '''
+        print(
+            f"{'Indexed:':<15}{'(year, month, town)' if 'indexed' in self.types else 'Off'}\n"
+        )
+
+        # Print timing summary
+        print(f"{'Phase':<20}{'Time (s)':>20}")
+        print(f"{'-' * 40}")
+        print(f"{'Initialisation':<20}{self.initialisation_time:>20.3f}")
+        print(f"{'Query Execution':<20}{self.query_execution_time:>20.3f}")
+        print(f"{'-' * 40}")
+        print(
+            f"{'Total':<20}{self.initialisation_time + self.query_execution_time:>20.3f}\n"
+        )
+
+        # Print column summary
+        print(f"{'Column':<20}{'Blocks':>10}{'Read':>10}")
+        print(f"{'-' * 40}")
+        for column in self.columns.values():
+            path = self.colstore_path / column.filename
+            if not path.exists():
+                continue
+
+            block_count = self.get_block_count(column)
+            read_count = self._file_read_counters[column.name]
+            print(f"{column.name:<20}{block_count:>10}{read_count:>10}")
+            total_block += block_count
+            total_read += read_count
+
+        print(f"{'-' * 40}")
+        print(f"{'Total':<20}{total_block:>10}{total_read:>10}")
+        print(f"{'=' * 40}\n")
+        '''
+
+        summary = {
+            "type": type,
+            "compression": 'On' if 'compressed' in self.types else 'Off',
+            "zone_maps": 'On' if 'zone map' in self.types else 'Off',
+            "indexed": '(year, month, town)' if 'indexed' in self.types else 'Off',
+            "phases": {
+                "Initialisation": self.initialisation_time,
+                "Query Execution": self.query_execution_time
+            },
+            "columns": {}
+        }
+
+        for column in self.columns.values():
+            path = self.colstore_path / column.filename
+            if not path.exists():
+                continue
+
+            block_count = self.get_block_count(column)
+            read_count = self._file_read_counters[column.name]
+            summary["columns"][column.name] = {"blocks": block_count, "read": read_count}
+            total_block += block_count
+            total_read += read_count
+
+        summary["totals"] = {"blocks": total_block, "read": total_read}
+        return summary
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     def print_summary(self) -> None:
         total_block = 0
