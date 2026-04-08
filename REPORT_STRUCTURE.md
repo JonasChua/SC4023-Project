@@ -18,14 +18,14 @@ Five progressively optimised store variants are implemented for side-by-side com
 |---|---------|-------------|
 | 1 | **Basic** | Strings stored as fixed-length byte arrays; no compression or indexing. Serves as the baseline. |
 | 2 | **Compressed** | Dictionary encoding applied to all categorical string columns; each unique string is mapped to a small integer ID. |
-| 3 | **Zone Map** | Per-block `(min, max)` metadata held in memory; blocks whose range cannot satisfy a predicate are skipped entirely. |
+| 3 | **Zone Map** | Per-page `(min, max)` metadata held in memory; pages whose range cannot satisfy a predicate are skipped entirely. |
 | 4 | **Indexed** | In-memory composite hash index on `(year, month, town)` for O(1) candidate-row lookup. |
 | 5 | **Combined** | All three optimisations (compression + zone maps + composite index) applied together. |
 
 The implementation is structured across several Python modules:
 
 - `column.py` -- Column type hierarchy (abstract `Column`, `NumericColumn`, `StringColumn`, and concrete subclasses `UnsignedCharColumn`, `UnsignedShortColumn`, `FloatColumn`)
-- `store.py` -- `ColumnStore` class responsible for file I/O, caching, zone maps, composite index, and block-level scanning
+- `store.py` -- `ColumnStore` class responsible for file I/O, caching, zone maps, composite index, and page-level scanning
 - `query.py` -- `QueryParser` (matriculation number decoding) and `QueryEngine` (predicate filtering and result selection)
 - `constants.py` -- Project-wide constants (`BLOCK_SIZE = 4096`, `MONTH_ABBR`, `DIGIT_TO_TOWN` mapping, column metadata classes)
 - `mapping.py` -- Compression dictionary persistence (`map_writer`, `map_loader`)
@@ -39,7 +39,7 @@ Each column is defined by a name, a binary format string (using Python's `struct
 
 **Basic store column layout (no compression):**
 
-| Column | Type | Format | Size (bytes) | Rows per 4 KB block |
+| Column | Type | Format | Size (bytes) | Rows per 4 KB page |
 |--------|------|--------|:------------:|:-------------------:|
 | `year` | `UnsignedShortColumn` | `H` (uint16) | 2 | 2048 |
 | `month` | `UnsignedCharColumn` | `B` (uint8) | 1 | 4096 |
@@ -68,15 +68,15 @@ When compression is enabled, categorical string columns are replaced by integer 
 
 The ID-to-string mappings are persisted as `*_map.csv` files alongside the binary column files and loaded at query time for decoding results.
 
-Total block count drops from **7,665** (basic) to **1,399** (compressed) -- an **82% reduction** in on-disk storage footprint.
+Total page count drops from **7,665** (basic) to **1,399** (compressed) -- an **82% reduction** in on-disk storage footprint.
 
-> **Suggested figure:** A bar chart comparing total allocated blocks per column between the basic and compressed store variants.
+> **Suggested figure:** A bar chart comparing total allocated pages per column between the basic and compressed store variants.
 
 ### 1.3 File I/O Operations
 
-All data access is performed through **4 KB block-aligned reads** (`BLOCK_SIZE = 4096`). The `_read_column` method (`store.py:265`) reads exactly one block at a time using `file.seek()` and `file.read(BLOCK_SIZE)`, then decodes the raw bytes into a list of typed values.
+All data access is performed through **4 KB page-aligned reads** (`BLOCK_SIZE = 4096`). The `_read_column` method (`store.py:265`) reads exactly one page at a time using `file.seek()` and `file.read(BLOCK_SIZE)`, then decodes the raw bytes into a list of typed values.
 
-**Block read workflow:**
+**Page read workflow:**
 
 1. Compute the file offset: `block_index * BLOCK_SIZE`
 2. Open the column's `.bin` file in binary mode
@@ -84,32 +84,32 @@ All data access is performed through **4 KB block-aligned reads** (`BLOCK_SIZE =
 4. Decode values by iterating in `column.size`-byte steps using `struct.unpack`
 5. Return the list of decoded values
 
-**Caching:** A dictionary `_cache[(column_name, block_index)]` stores previously read blocks in memory. Subsequent accesses to the same block are served from cache without disk I/O. File read counters (`_file_read_counters`) track how many *unique* block reads occur per column during query execution, enabling precise I/O measurement.
+**Caching:** A dictionary `_cache[(column_name, block_index)]` stores previously read pages in memory. Subsequent accesses to the same page are served from cache without disk I/O. File read counters (`_file_read_counters`) track how many *unique* page reads occur per column during query execution, enabling precise I/O measurement.
 
-**Block count calculation** (`store.py:227`):
-
-```
-block_count = ceil(file_size / BLOCK_SIZE)
-```
-
-**Row-to-block mapping** (`store.py:237`):
+**Page count calculation** (`store.py:227`):
 
 ```
-block_index = (row_index * column.size) // BLOCK_SIZE
+page_count = ceil(file_size / BLOCK_SIZE)
 ```
 
-This ensures that given any row index, the system can compute the exact block to fetch, enabling random access when using the composite index.
+**Row-to-page mapping** (`store.py:237`):
 
-> **Suggested figure:** A flowchart of the block read path -- cache check, file seek, raw read, decode, cache store.
+```
+page_index = (row_index * column.size) // BLOCK_SIZE
+```
+
+This ensures that given any row index, the system can compute the exact page to fetch, enabling random access when using the composite index.
+
+> **Suggested figure:** A flowchart of the page read path -- cache check, file seek, raw read, decode, cache store.
 
 ### 1.4 Exception Handling
 
 The codebase implements defensive validation at several levels:
 
 - **Column name validation** (`store.py:59`): `_validate_column_name` raises `ValueError` if a queried column does not exist in the store.
-- **Block index bounds** (`store.py:273`): Negative block indices raise `ValueError`; out-of-range indices return an empty list gracefully.
-- **Row index bounds** (`store.py:360`): `get_value` raises `IndexError` if the within-block index exceeds the block's decoded length.
-- **Zone map bounds** (`column.py:56`): `get_block_zone` raises `IndexError` for out-of-range block indices.
+- **Page index bounds** (`store.py:273`): Negative page indices raise `ValueError`; out-of-range indices return an empty list gracefully.
+- **Row index bounds** (`store.py:360`): `get_value` raises `IndexError` if the within-page index exceeds the page's decoded length.
+- **Zone map bounds** (`column.py:56`): `get_block_zone` raises `IndexError` for out-of-range page indices.
 - **Compression map guards** (`column.py:27`): Operations on compression mappings raise `ValueError` if the feature is not enabled for the column.
 - **Month parsing** (`store.py:43`): Invalid `MMM-YY` strings raise `ValueError` with descriptive messages.
 - **CSV field parsing** (`store.py:112`): Numeric fields that fail `literal_eval` default to `0` instead of crashing, ensuring the ingestion pipeline is resilient to malformed data.
@@ -143,7 +143,7 @@ This produces **8 x 71 = 568** parameter combinations per store variant.
 4. From those rows, filter by `floor_area_sqm >= y`
 5. For surviving rows, compute `resale_price / floor_area_sqm` and select the minimum
 
-The filtering is applied progressively -- each step narrows the candidate set before the next column is scanned. When indices are provided to `scan_column` (`store.py:306`), only the blocks containing those row indices are read, and within each block only the relevant rows are checked.
+The filtering is applied progressively -- each step narrows the candidate set before the next column is scanned. When indices are provided to `scan_column` (`store.py:306`), only the pages containing those row indices are read, and within each page only the relevant rows are checked.
 
 **Indexed scan (indexed, combined):**
 1. For each `(month, town)` combination in the query range, perform an O(1) hash lookup into the composite index to retrieve pre-filtered row indices
@@ -154,27 +154,25 @@ The filtering is applied progressively -- each step narrows the candidate set be
 
 ### 2.2 Data Retrieval
 
-**Zone map pruning:**
+**Baseline sequential scan (basic store):**
 
-When zone maps are enabled, the `_match_zone_map` method (`store.py:243`) checks whether a block's `(min, max)` range can possibly satisfy the predicate. If not, the entire block is skipped -- no file I/O occurs for that block.
+In the default basic store, data retrieval follows a straightforward sequential scan. The `scan_column` method (`store.py:306`) iterates through every page of a column from page 0 to the last page. For each page, it calls `_read_column` (`store.py:265`) which reads a 4 KB page from disk, decodes all values, and applies the predicate function to each value. Matching row indices are collected and passed to the next column's scan as a filter.
 
-For numeric predicates (e.g. `year == 2016`), the method attempts to evaluate the predicate against `min`, `max`, and all integer values in `[min, max]`. This allows both equality and range predicates to benefit from pruning.
+The scan is **progressive** -- each column narrows the candidate set before the next column is scanned. For example, scanning `year` first may reduce 259,237 rows to ~26,000 rows for year 2016. Subsequent scans of `month` and `town` then only check rows within pages that contain those candidate indices, rather than scanning every page again. This pre-filtering is handled by the `indices` parameter in `scan_column`: when provided, the method computes which pages overlap with the given row indices and skips pages that contain none (`store.py:329-334`).
 
-Zone maps are particularly effective for `year` and `month` because the data has natural temporal ordering -- consecutive blocks tend to contain similar year/month values, enabling large contiguous skips.
+However, even with progressive filtering, the first column (`year`) must still be scanned in its entirety -- all 127 pages are read. This is the fundamental limitation that the efficiency enhancements in Section 2.3 address.
 
-**Compression-aware filtering:**
+**Value retrieval by row index:**
 
-When scanning a compressed column (e.g. `town`), the `QueryEngine` maps the target string values to their integer IDs *before* scanning (`query.py:95`). This avoids decompressing each value during the scan -- the predicate operates directly on integer comparisons, which is faster.
+Once candidate row indices are identified (either by scanning or via index lookup), individual values are retrieved using `get_value` (`store.py:352`). This method computes the target page index from the row index (`page_index = row_index * column.size // BLOCK_SIZE`), reads the page (served from cache if already loaded), and extracts the value at the correct within-page offset. This random-access pattern is used for reading `floor_area_sqm` and `resale_price` when computing price per square metre, and for assembling the final result row.
 
-**Composite index lookup:**
+**Result row assembly:**
 
-The composite index (`store.py:172`) is a Python dictionary mapping `(year, month, town)` tuples to lists of row indices. At query time, `query_composite_index` (`store.py:202`) returns matching rows in O(1). The index is built once during initialisation by reading all three columns sequentially.
+Once the best row index (minimum price per sqm) is identified by `select_minimum_price_per_floor_area` (`query.py:115`), the method `select_row_data` (`query.py:137`) reads all 11 column values for that row using `get_value`. For compressed columns, the integer ID is decoded back to the original string via `unmap_value` to produce human-readable output.
 
-**Result row retrieval:**
+**Result export:**
 
-Once the best row index is identified, `select_row_data` (`query.py:137`) reads all 11 column values for that row using `get_value`. For compressed columns, the integer ID is decoded back to the original string via `unmap_value`.
-
-Results are exported to `result/ScanResult_A6626226B.csv` with columns: `(x, y)`, Year, Month, Town, Block, Floor_Area, Flat_Model, Lease_Commence_Date, Price_Per_Square_Meter.
+Results for all 568 `(x, y)` parameter combinations are exported to `result/ScanResult_A6626226B.csv` with columns: `(x, y)`, Year, Month, Town, Block, Floor_Area, Flat_Model, Lease_Commence_Date, Price_Per_Square_Meter. Combinations where no qualifying transaction exists are omitted from the output.
 
 ### 2.3 Efficiency Enhancements
 
@@ -183,23 +181,29 @@ Three key optimisations are implemented, each reducing I/O and/or computation:
 **1. Dictionary Compression**
 
 Categorical string columns are replaced by 1--2 byte integer IDs via dictionary encoding. This reduces:
-- **Storage:** Total blocks from 7,665 to 1,399 (82% reduction)
-- **I/O per block read:** Smaller values = more rows per block
+- **Storage:** Total pages from 7,665 to 1,399 (82% reduction)
+- **I/O per page read:** Smaller values = more rows per page
 - **Comparison cost:** Integer comparison vs. string comparison during scans
 
 The trade-off is a small initialisation overhead for writing and loading the `*_map.csv` mapping files (~0.014s vs ~0.001s).
 
+Additionally, when scanning a compressed column (e.g. `town`), the `QueryEngine` maps the target string values to their integer IDs *before* scanning (`query.py:95`). This avoids decompressing each value during the scan -- the predicate operates directly on integer comparisons, which is faster.
+
 **2. Zone Maps**
 
-Per-block `(min, max)` metadata enables block-level predicate pruning. Results:
-- Blocks read reduced from **248 to 131** (47% reduction vs. basic)
-- Most effective on `year` (127 -> 11 blocks read) due to temporal ordering
+Per-page `(min, max)` metadata is built during initialisation and held in memory. During a scan, the `_match_zone_map` method (`store.py:243`) checks whether a page's min/max range can possibly satisfy the predicate. If not, the entire page is skipped without any file I/O.
+
+For numeric predicates (e.g. `year == 2016`), the method evaluates the predicate against `min`, `max`, and all integer values in `[min, max]`, supporting both equality and range predicates.
+
+Zone maps are particularly effective for `year` and `month` because the data has natural temporal ordering -- consecutive pages tend to contain similar values, enabling large contiguous skips. Results:
+- Pages read reduced from **248 to 131** (47% reduction vs. basic)
+- Most effective on `year` (127 -> 11 pages read) due to temporal ordering
 - Initialisation cost: ~0.936s (building zone maps requires a full scan of each zone-mapped column)
 
 **3. Composite Index on (year, month, town)**
 
-A hash-based index eliminates the need to scan year, month, and town columns at query time:
-- Blocks read: **248 -> 76** (69% reduction vs. basic)
+The composite index (`store.py:172`) is a Python dictionary mapping `(year, month, town)` tuples to lists of row indices. It is built once during initialisation by reading all three columns sequentially. At query time, `query_composite_index` (`store.py:202`) returns matching rows in O(1), completely eliminating the need to scan year, month, and town columns:
+- Pages read: **248 -> 76** (69% reduction vs. basic)
 - Query time: **165.439s -> 2.388s** (98.6% reduction)
 - Initialisation cost: ~0.929s (reading three columns to build the index)
 
@@ -207,15 +211,15 @@ A hash-based index eliminates the need to scan year, month, and town columns at 
 
 | Metric | Basic | Combined |
 |--------|------:|--------:|
-| Total blocks allocated | 7,665 | 1,399 |
-| Total blocks read | 248 | 65 |
+| Total pages allocated | 7,665 | 1,399 |
+| Total pages read | 248 | 65 |
 | Initialisation time (s) | 0.001 | 0.920 |
 | Query execution time (s) | 165.439 | 2.460 |
 | **Total time (s)** | **165.441** | **3.380** |
 
-The combined variant achieves a **97.96% reduction in total execution time** and a **73.8% reduction in blocks read** compared to the baseline.
+The combined variant achieves a **97.96% reduction in total execution time** and a **73.8% reduction in pages read** compared to the baseline.
 
-> **Suggested figure:** A table or grouped bar chart comparing all 5 variants across initialisation time, query time, total blocks allocated, and total blocks read.
+> **Suggested figure:** A table or grouped bar chart comparing all 5 variants across initialisation time, query time, total pages allocated, and total pages read.
 
 ---
 
@@ -394,8 +398,8 @@ Correctness is validated by verifying that all five store variants produce **ide
 1. **All variants identify the same best row** for each `(x, y)` pair -- the minimum-price-per-sqm transaction is deterministic regardless of which optimisation path is used.
 2. **The composite index returns the same candidate rows** as the sequential year -> month -> town scan. The index is built from the same underlying column data, so the mapping is exact.
 3. **Compression does not alter values** -- the dictionary encoding is lossless. Original string values are recoverable via `unmap_value` at result time, and numeric columns (`year`, `month`, `floor_area_sqm`, `resale_price`, `lease_commence_date`) are never compressed.
-4. **Zone maps only skip blocks guaranteed to not match** -- the `(min, max)` check is conservative. A block is skipped only if no value in `[min, max]` can satisfy the predicate. This preserves completeness (no false negatives).
-5. **Block read counts differ but results are identical** -- the optimisations reduce I/O but never alter the logical result set. This is the fundamental correctness invariant.
+4. **Zone maps only skip pages guaranteed to not match** -- the `(min, max)` check is conservative. A page is skipped only if no value in `[min, max]` can satisfy the predicate. This preserves completeness (no false negatives).
+5. **Page read counts differ but results are identical** -- the optimisations reduce I/O but never alter the logical result set. This is the fundamental correctness invariant.
 
 The exported CSV (`ScanResult_A6626226B.csv`) contains 568 rows corresponding to all `(x, y)` combinations from `(1, 80)` to `(8, 150)`. Rows where no qualifying transaction exists are omitted from the CSV.
 
