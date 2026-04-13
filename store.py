@@ -234,6 +234,12 @@ class ColumnStore:
 
         return (path.stat().st_size + BLOCK_SIZE - 1) // BLOCK_SIZE
 
+    def get_block_read_count(self, column: ColumnType) -> int:
+        """
+        Get the number of blocks read for a given column.
+        """
+        return self._file_read_counters.get(column.name, 0)
+
     def get_block_index(self, column: ColumnType, row_index: int) -> int:
         """
         Get the block index for a given column and row index.
@@ -393,7 +399,7 @@ class ColumnStore:
                 continue
 
             block_count = self.get_block_count(column)
-            read_count = self._file_read_counters[column.name]
+            read_count = self.get_block_read_count(column)
             print(f"{column.name:<20}{block_count:>10}{read_count:>10}")
             total_block += block_count
             total_read += read_count

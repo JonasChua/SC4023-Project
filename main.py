@@ -1,120 +1,87 @@
-from column import FloatColumn, StringColumn, UnsignedCharColumn, UnsignedShortColumn
-from constants import COLSTORE_DIR
-from query import QueryEngine
-from store import ColumnStore
+from argparse import ArgumentParser, ArgumentTypeError, Namespace
+
+from export import export_query_statistics, export_query_statistics_txt, export_results
+from plot import QueryStatisticsPlotter
+from query import (
+    run_basic_store_query,
+    run_compressed_store_query,
+    run_indexed_basic_store_query,
+    run_indexed_zone_map_compressed_store_query,
+    run_zone_map_basic_store_query,
+)
 
 
-def run_basic_store_query(matric_str):
-    columns = dict(
-        year=UnsignedShortColumn("year"),
-        month=UnsignedCharColumn("month"),
-        town=StringColumn("town", 16),
-        flat_type=StringColumn("flat_type", 16),
-        block=StringColumn("block", 4),
-        street_name=StringColumn("street_name", 32),
-        storey_range=StringColumn("storey_range", 8),
-        floor_area_sqm=FloatColumn("floor_area_sqm"),
-        flat_model=StringColumn("flat_model", 32),
-        lease_commence_date=UnsignedShortColumn("lease_commence_date"),
-        resale_price=FloatColumn("resale_price"),
-    )
-    store = ColumnStore(["basic"], COLSTORE_DIR / "basic", columns)
-    query_engine = QueryEngine(store, matric_str)
-    query_engine.execute_query()
-    store.print_summary()
-
-
-def run_compressed_store_query(matric_str):
-    columns = dict(
-        year=UnsignedShortColumn("year"),
-        month=UnsignedCharColumn("month"),
-        town=UnsignedCharColumn("town", enable_compression_map=True),
-        flat_type=UnsignedCharColumn("flat_type", enable_compression_map=True),
-        block=UnsignedShortColumn("block", enable_compression_map=True),
-        street_name=UnsignedShortColumn("street_name", enable_compression_map=True),
-        storey_range=UnsignedCharColumn("storey_range", enable_compression_map=True),
-        floor_area_sqm=FloatColumn("floor_area_sqm"),
-        flat_model=UnsignedShortColumn("flat_model", enable_compression_map=True),
-        lease_commence_date=UnsignedShortColumn("lease_commence_date"),
-        resale_price=FloatColumn("resale_price"),
-    )
-    store = ColumnStore(["compressed"], COLSTORE_DIR / "compressed", columns)
-    query_engine = QueryEngine(store, matric_str)
-    query_engine.execute_query()
-    store.print_summary()
-
-
-def run_zone_map_basic_store_query(matric_str):
-    columns = dict(
-        year=UnsignedShortColumn("year", enable_zone_map=True),
-        month=UnsignedCharColumn("month", enable_zone_map=True),
-        town=StringColumn("town", 16),
-        flat_type=StringColumn("flat_type", 16),
-        block=StringColumn("block", 4),
-        street_name=StringColumn("street_name", 32),
-        storey_range=StringColumn("storey_range", 8),
-        floor_area_sqm=FloatColumn("floor_area_sqm", enable_zone_map=True),
-        flat_model=StringColumn("flat_model", 32),
-        lease_commence_date=UnsignedShortColumn(
-            "lease_commence_date", enable_zone_map=True
+def run_query(args: Namespace) -> None:
+    matric_str = args.matric
+    repeat_count = args.repeat_count
+    query_engines = {
+        "Basic": run_basic_store_query(matric_str, repeat_count),
+        "Compressed": run_compressed_store_query(matric_str, repeat_count),
+        "Zone Map": run_zone_map_basic_store_query(matric_str, repeat_count),
+        "Indexed": run_indexed_basic_store_query(matric_str, repeat_count),
+        "Compressed + Zone Map + Indexed": run_indexed_zone_map_compressed_store_query(
+            matric_str, repeat_count
         ),
-        resale_price=FloatColumn("resale_price", enable_zone_map=True),
-    )
-    store = ColumnStore(["zone map", "basic"], COLSTORE_DIR / "basic", columns)
-    query_engine = QueryEngine(store, matric_str)
-    query_engine.execute_query()
-    store.print_summary()
+    }
+    export_query_statistics_txt(query_engines)
+    if args.export_result:
+        export_results(query_engines["Compressed + Zone Map + Indexed"])
+
+    if args.export_stats:
+        export_query_statistics(query_engines)
 
 
-def run_indexed_basic_store_query(matric_str):
-    columns = dict(
-        year=UnsignedShortColumn("year"),
-        month=UnsignedCharColumn("month"),
-        town=StringColumn("town", 16),
-        flat_type=StringColumn("flat_type", 16),
-        block=StringColumn("block", 4),
-        street_name=StringColumn("street_name", 32),
-        storey_range=StringColumn("storey_range", 8),
-        floor_area_sqm=FloatColumn("floor_area_sqm"),
-        flat_model=StringColumn("flat_model", 32),
-        lease_commence_date=UnsignedShortColumn("lease_commence_date"),
-        resale_price=FloatColumn("resale_price"),
-    )
-    store = ColumnStore(["indexed", "basic"], COLSTORE_DIR / "basic", columns)
-    query_engine = QueryEngine(store, matric_str)
-    query_engine.execute_query()
-    store.print_summary()
+def run_plot() -> None:
+    QueryStatisticsPlotter().plot()
 
 
-def run_indexed_zone_map_compressed_store_query(matric_str):
-    columns = dict(
-        year=UnsignedShortColumn("year"),
-        month=UnsignedCharColumn("month"),
-        town=UnsignedCharColumn("town", enable_compression_map=True),
-        flat_type=UnsignedCharColumn("flat_type", enable_compression_map=True),
-        block=UnsignedShortColumn("block", enable_compression_map=True),
-        street_name=UnsignedShortColumn("street_name", enable_compression_map=True),
-        storey_range=UnsignedCharColumn("storey_range", enable_compression_map=True),
-        floor_area_sqm=FloatColumn("floor_area_sqm", enable_zone_map=True),
-        flat_model=UnsignedShortColumn("flat_model", enable_compression_map=True),
-        lease_commence_date=UnsignedShortColumn(
-            "lease_commence_date", enable_zone_map=True
-        ),
-        resale_price=FloatColumn("resale_price", enable_zone_map=True),
-    )
-    store = ColumnStore(
-        ["indexed", "zone map", "compressed"], COLSTORE_DIR / "compressed", columns
-    )
-    query_engine = QueryEngine(store, matric_str)
-    query_engine.execute_query()
-    store.print_summary()
-    query_engine.export_results()
+def _positive_int(value: str) -> int:
+    repeat_count = int(value)
+    if repeat_count < 1:
+        raise ArgumentTypeError("repeat count must be at least 1")
+
+    return repeat_count
 
 
 if __name__ == "__main__":
-    matric_str = "A6626226B"
-    run_basic_store_query(matric_str)
-    run_compressed_store_query(matric_str)
-    run_zone_map_basic_store_query(matric_str)
-    run_indexed_basic_store_query(matric_str)
-    run_indexed_zone_map_compressed_store_query(matric_str)
+    parser = ArgumentParser(description="Run queries on the column store")
+    subparsers = parser.add_subparsers(
+        dest="command", help="Command to run", required=False
+    )
+    query_parser = subparsers.add_parser("query", help="Run queries and export results")
+    query_parser.add_argument(
+        "-m",
+        "--matric",
+        type=str,
+        help="Matriculation number to use for the queries (default: A6626226B)",
+        default="A6626226B",
+    )
+    query_parser.add_argument(
+        "-r",
+        "--export-result",
+        action="store_true",
+        help="Whether to export the query results to CSV file",
+    )
+    query_parser.add_argument(
+        "-s",
+        "--export-stats",
+        action="store_true",
+        help="Whether to export the query execution statistics to CSV & TXT files",
+    )
+    query_parser.add_argument(
+        "-n",
+        "--repeat-count",
+        type=_positive_int,
+        default=1,
+        help="Number of times to run each query and average the timings (default: 1)",
+    )
+    plot_parser = subparsers.add_parser("plot", help="Plot query execution statistics")
+    args = parser.parse_args()
+
+    match args.command:
+        case "query":
+            run_query(args)
+        case "plot":
+            run_plot()
+        case _:
+            parser.print_help()

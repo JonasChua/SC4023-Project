@@ -4,4 +4,7 @@ version = "0.1.0"
 description = "SC4023 Project"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "matplotlib>=3.10.8",
+    "pandas>=3.0.2",
+]

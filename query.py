@@ -1,8 +1,11 @@
-from csv import DictWriter
+from collections.abc import Callable
+from dataclasses import dataclass
+from statistics import fmean
 from time import perf_counter
 from typing import Any
 
-from constants import DIGIT_TO_TOWN, PROJECT_ROOT
+from column import FloatColumn, StringColumn, UnsignedCharColumn, UnsignedShortColumn
+from constants import COLSTORE_DIR, DIGIT_TO_TOWN
 from store import ColumnStore
 
 
@@ -197,43 +200,161 @@ class QueryEngine:
 
         self.colstore.query_execution_time = perf_counter() - start
 
-    def export_results(self) -> None:
-        """
-        Export the query results into ScanResult_<matric_str>.csv file.
-        """
-        result_dir = PROJECT_ROOT / "result"
-        result_dir.mkdir(parents=True, exist_ok=True)
-        output_path = result_dir / f"ScanResult_{self.query.matric_str}.csv"
-        with output_path.open("w", newline="") as csvfile:
-            fieldnames = [
-                "(x, y)",
-                "Year",
-                "Month",
-                "Town",
-                "Block",
-                "Floor_Area",
-                "Flat_Model",
-                "Lease_Commence_Date",
-                "Price_Per_Square_Meter",
-            ]
-            writer = DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
 
-            for (x, y), data in self.results.items():
-                # print(f"{x=} {y=}")
-                if data is not None:
-                    writer.writerow(
-                        {
-                            "(x, y)": f"({x}, {y})",
-                            "Year": data["year"],
-                            "Month": data["month"],
-                            "Town": data["town"],
-                            "Block": data["block"],
-                            "Floor_Area": data["floor_area_sqm"],
-                            "Flat_Model": data["flat_model"],
-                            "Lease_Commence_Date": data["lease_commence_date"],
-                            "Price_Per_Square_Meter": data["price_per_sqm"],
-                        }
-                    )
+@dataclass
+class QueryTimings:
+    initialisation_time: float
+    execution_time: float
 
-        print(f"Results exported to {output_path.relative_to(PROJECT_ROOT)}")
+
+def _average_query_timings(query_engines: list["QueryEngine"]) -> QueryTimings:
+    """
+    Average the initialisation and execution times from a list of QueryEngines.
+    """
+    return QueryTimings(
+        initialisation_time=fmean(
+            query_engine.colstore.initialisation_time for query_engine in query_engines
+        ),
+        execution_time=fmean(
+            query_engine.colstore.query_execution_time for query_engine in query_engines
+        ),
+    )
+
+
+def _run_query_multiple_times(
+    repeat_count: int, build_store: Callable[[], ColumnStore], matric_str: str
+) -> QueryEngine:
+    """
+    Run the query multiple times and return a QueryEngine with averaged timings.
+    """
+    query_engines: list[QueryEngine] = []
+    for _ in range(repeat_count):
+        store = build_store()
+        query_engine = QueryEngine(store, matric_str)
+        query_engine.execute_query()
+        query_engines.append(query_engine)
+
+    averaged_timings = _average_query_timings(query_engines)
+    averaged_query_engine = query_engines[-1]
+    averaged_query_engine.colstore.initialisation_time = (
+        averaged_timings.initialisation_time
+    )
+    averaged_query_engine.colstore.query_execution_time = (
+        averaged_timings.execution_time
+    )
+    averaged_query_engine.colstore.print_summary()
+    return averaged_query_engine
+
+
+def run_basic_store_query(matric_str, repeat_count: int = 1) -> QueryEngine:
+    def build_store() -> ColumnStore:
+        columns = dict(
+            year=UnsignedShortColumn("year"),
+            month=UnsignedCharColumn("month"),
+            town=StringColumn("town", 16),
+            flat_type=StringColumn("flat_type", 16),
+            block=StringColumn("block", 4),
+            street_name=StringColumn("street_name", 32),
+            storey_range=StringColumn("storey_range", 8),
+            floor_area_sqm=FloatColumn("floor_area_sqm"),
+            flat_model=StringColumn("flat_model", 32),
+            lease_commence_date=UnsignedShortColumn("lease_commence_date"),
+            resale_price=FloatColumn("resale_price"),
+        )
+        return ColumnStore(["basic"], COLSTORE_DIR / "basic", columns)
+
+    return _run_query_multiple_times(repeat_count, build_store, matric_str)
+
+
+def run_compressed_store_query(matric_str, repeat_count: int = 1) -> QueryEngine:
+    def build_store() -> ColumnStore:
+        columns = dict(
+            year=UnsignedShortColumn("year"),
+            month=UnsignedCharColumn("month"),
+            town=UnsignedCharColumn("town", enable_compression_map=True),
+            flat_type=UnsignedCharColumn("flat_type", enable_compression_map=True),
+            block=UnsignedShortColumn("block", enable_compression_map=True),
+            street_name=UnsignedShortColumn("street_name", enable_compression_map=True),
+            storey_range=UnsignedCharColumn(
+                "storey_range", enable_compression_map=True
+            ),
+            floor_area_sqm=FloatColumn("floor_area_sqm"),
+            flat_model=UnsignedShortColumn("flat_model", enable_compression_map=True),
+            lease_commence_date=UnsignedShortColumn("lease_commence_date"),
+            resale_price=FloatColumn("resale_price"),
+        )
+        return ColumnStore(["compressed"], COLSTORE_DIR / "compressed", columns)
+
+    return _run_query_multiple_times(repeat_count, build_store, matric_str)
+
+
+def run_zone_map_basic_store_query(matric_str, repeat_count: int = 1) -> QueryEngine:
+    def build_store() -> ColumnStore:
+        columns = dict(
+            year=UnsignedShortColumn("year", enable_zone_map=True),
+            month=UnsignedCharColumn("month", enable_zone_map=True),
+            town=StringColumn("town", 16),
+            flat_type=StringColumn("flat_type", 16),
+            block=StringColumn("block", 4),
+            street_name=StringColumn("street_name", 32),
+            storey_range=StringColumn("storey_range", 8),
+            floor_area_sqm=FloatColumn("floor_area_sqm", enable_zone_map=True),
+            flat_model=StringColumn("flat_model", 32),
+            lease_commence_date=UnsignedShortColumn(
+                "lease_commence_date", enable_zone_map=True
+            ),
+            resale_price=FloatColumn("resale_price", enable_zone_map=True),
+        )
+        return ColumnStore(["zone map", "basic"], COLSTORE_DIR / "basic", columns)
+
+    return _run_query_multiple_times(repeat_count, build_store, matric_str)
+
+
+def run_indexed_basic_store_query(matric_str, repeat_count: int = 1) -> QueryEngine:
+    def build_store() -> ColumnStore:
+        columns = dict(
+            year=UnsignedShortColumn("year"),
+            month=UnsignedCharColumn("month"),
+            town=StringColumn("town", 16),
+            flat_type=StringColumn("flat_type", 16),
+            block=StringColumn("block", 4),
+            street_name=StringColumn("street_name", 32),
+            storey_range=StringColumn("storey_range", 8),
+            floor_area_sqm=FloatColumn("floor_area_sqm"),
+            flat_model=StringColumn("flat_model", 32),
+            lease_commence_date=UnsignedShortColumn("lease_commence_date"),
+            resale_price=FloatColumn("resale_price"),
+        )
+        return ColumnStore(["indexed", "basic"], COLSTORE_DIR / "basic", columns)
+
+    return _run_query_multiple_times(repeat_count, build_store, matric_str)
+
+
+def run_indexed_zone_map_compressed_store_query(
+    matric_str, repeat_count: int = 1
+) -> QueryEngine:
+    def build_store() -> ColumnStore:
+        columns = dict(
+            year=UnsignedShortColumn("year"),
+            month=UnsignedCharColumn("month"),
+            town=UnsignedCharColumn("town", enable_compression_map=True),
+            flat_type=UnsignedCharColumn("flat_type", enable_compression_map=True),
+            block=UnsignedShortColumn("block", enable_compression_map=True),
+            street_name=UnsignedShortColumn("street_name", enable_compression_map=True),
+            storey_range=UnsignedCharColumn(
+                "storey_range", enable_compression_map=True
+            ),
+            floor_area_sqm=FloatColumn("floor_area_sqm", enable_zone_map=True),
+            flat_model=UnsignedShortColumn("flat_model", enable_compression_map=True),
+            lease_commence_date=UnsignedShortColumn(
+                "lease_commence_date", enable_zone_map=True
+            ),
+            resale_price=FloatColumn("resale_price", enable_zone_map=True),
+        )
+        return ColumnStore(
+            ["indexed", "zone map", "compressed"],
+            COLSTORE_DIR / "compressed",
+            columns,
+        )
+
+    return _run_query_multiple_times(repeat_count, build_store, matric_str)

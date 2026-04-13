@@ -1,0 +1,144 @@
+========= Column Store Summary =========
+Compression:   Off
+Zone Maps:     Off
+Indexed:       Off
+
+Phase                           Time (s)
+----------------------------------------
+Initialisation                     0.001
+Query Execution                  162.916
+----------------------------------------
+Total                            162.917
+
+Column                  Blocks      Read
+----------------------------------------
+year                       127       127
+month                       64         6
+town                      1013        54
+flat_type                 1013         6
+block                      254         6
+street_name               2026         7
+storey_range               507         6
+floor_area_sqm             254        12
+flat_model                2026         7
+lease_commence_date        127         5
+resale_price               254        12
+----------------------------------------
+Total                     7665       248
+========================================
+
+========= Column Store Summary =========
+Compression:   On
+Zone Maps:     Off
+Indexed:       Off
+
+Phase                           Time (s)
+----------------------------------------
+Initialisation                     0.010
+Query Execution                   48.894
+----------------------------------------
+Total                             48.904
+
+Column                  Blocks      Read
+----------------------------------------
+year                       127       127
+month                       64         6
+town                        64         4
+flat_type                   64         4
+block                      127         5
+street_name                127         5
+storey_range                64         4
+floor_area_sqm             254        12
+flat_model                 127         5
+lease_commence_date        127         5
+resale_price               254        12
+----------------------------------------
+Total                     1399       189
+========================================
+
+========= Column Store Summary =========
+Compression:   Off
+Zone Maps:     On
+Indexed:       Off
+
+Phase                           Time (s)
+----------------------------------------
+Initialisation                     0.812
+Query Execution                  149.529
+----------------------------------------
+Total                            150.340
+
+Column                  Blocks      Read
+----------------------------------------
+year                       127        11
+month                       64         5
+town                      1013        54
+flat_type                 1013         6
+block                      254         6
+street_name               2026         7
+storey_range               507         6
+floor_area_sqm             254        12
+flat_model                2026         7
+lease_commence_date        127         5
+resale_price               254        12
+----------------------------------------
+Total                     7665       131
+========================================
+
+========= Column Store Summary =========
+Compression:   Off
+Zone Maps:     Off
+Indexed:       (year, month, town)
+
+Phase                           Time (s)
+----------------------------------------
+Initialisation                     0.894
+Query Execution                    2.292
+----------------------------------------
+Total                              3.186
+
+Column                  Blocks      Read
+----------------------------------------
+year                       127         5
+month                       64         4
+town                      1013         6
+flat_type                 1013         6
+block                      254         6
+street_name               2026         7
+storey_range               507         6
+floor_area_sqm             254        12
+flat_model                2026         7
+lease_commence_date        127         5
+resale_price               254        12
+----------------------------------------
+Total                     7665        76
+========================================
+
+========= Column Store Summary =========
+Compression:   On
+Zone Maps:     On
+Indexed:       (year, month, town)
+
+Phase                           Time (s)
+----------------------------------------
+Initialisation                     0.859
+Query Execution                    2.377
+----------------------------------------
+Total                              3.236
+
+Column                  Blocks      Read
+----------------------------------------
+year                       127         5
+month                       64         4
+town                        64         4
+flat_type                   64         4
+block                      127         5
+street_name                127         5
+storey_range                64         4
+floor_area_sqm             254        12
+flat_model                 127         5
+lease_commence_date        127         5
+resale_price               254        12
+----------------------------------------
+Total                     1399        65
+========================================
