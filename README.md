@@ -27,10 +27,10 @@ You can also pass the available options from `main.py`, for example:
 uv run main.py query -m A6626226B -n 10 -s -r
 ```
 
-To run only the indexed + zone map + compressed experiment query and print the top 10 result rows in the terminal:
+To run only the indexed + zone map + compressed experiment query and print the first 10 result rows in the terminal:
 
 ```powershell
-uv run main.py query --experiment-result -m A6626226B
+uv run main.py query -e -m A6626226B
 ```
 
 ## Run Plot with uv
