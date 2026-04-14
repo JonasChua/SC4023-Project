@@ -44,22 +44,20 @@ def _print_rows(query_engine: QueryEngine, limit: int = 10) -> None:
 
 def run_query(args: Namespace) -> None:
     matric_str = args.matric
-    repeat_count = args.repeat_count
+    repeat = args.repeat
 
-    if args.experiment_result:
-        query_engine = run_indexed_zone_map_compressed_store_query(
-            matric_str, repeat_count
-        )
+    if args.experiment:
+        query_engine = run_indexed_zone_map_compressed_store_query(matric_str, repeat)
         _print_rows(query_engine, 10)
         return
 
     query_engines = {
-        "Basic": run_basic_store_query(matric_str, repeat_count),
-        "Compressed": run_compressed_store_query(matric_str, repeat_count),
-        "Zone Map": run_zone_map_basic_store_query(matric_str, repeat_count),
-        "Indexed": run_indexed_basic_store_query(matric_str, repeat_count),
+        "Basic": run_basic_store_query(matric_str, repeat),
+        "Compressed": run_compressed_store_query(matric_str, repeat),
+        "Zone Map": run_zone_map_basic_store_query(matric_str, repeat),
+        "Indexed": run_indexed_basic_store_query(matric_str, repeat),
         "Compressed + Zone Map + Indexed": run_indexed_zone_map_compressed_store_query(
-            matric_str, repeat_count
+            matric_str, repeat
         ),
     }
     export_query_statistics_txt(query_engines)
@@ -75,11 +73,11 @@ def run_plot() -> None:
 
 
 def _positive_int(value: str) -> int:
-    repeat_count = int(value)
-    if repeat_count < 1:
+    repeat = int(value)
+    if repeat < 1:
         raise ArgumentTypeError("repeat count must be at least 1")
 
-    return repeat_count
+    return repeat
 
 
 if __name__ == "__main__":
@@ -109,14 +107,14 @@ if __name__ == "__main__":
     )
     query_parser.add_argument(
         "-n",
-        "--repeat-count",
+        "--repeat",
         type=_positive_int,
         default=1,
         help="Number of times to run each query and average the timings (default: 1)",
     )
     query_parser.add_argument(
         "-e",
-        "--experiment-result",
+        "--experiment",
         action="store_true",
         help="Run only the indexed + zone map + compressed query and print the top 10 rows",
     )

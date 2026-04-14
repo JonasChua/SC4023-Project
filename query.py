@@ -222,13 +222,13 @@ def _average_query_timings(query_engines: list["QueryEngine"]) -> QueryTimings:
 
 
 def _run_query_multiple_times(
-    repeat_count: int, build_store: Callable[[], ColumnStore], matric_str: str
+    repeat: int, build_store: Callable[[], ColumnStore], matric_str: str
 ) -> QueryEngine:
     """
     Run the query multiple times and return a QueryEngine with averaged timings.
     """
     query_engines: list[QueryEngine] = []
-    for _ in range(repeat_count):
+    for _ in range(repeat):
         store = build_store()
         query_engine = QueryEngine(store, matric_str)
         query_engine.execute_query()
@@ -246,7 +246,7 @@ def _run_query_multiple_times(
     return averaged_query_engine
 
 
-def run_basic_store_query(matric_str, repeat_count: int = 1) -> QueryEngine:
+def run_basic_store_query(matric_str, repeat: int = 1) -> QueryEngine:
     def build_store() -> ColumnStore:
         columns = dict(
             year=UnsignedShortColumn("year"),
@@ -263,10 +263,10 @@ def run_basic_store_query(matric_str, repeat_count: int = 1) -> QueryEngine:
         )
         return ColumnStore(["basic"], COLSTORE_DIR / "basic", columns)
 
-    return _run_query_multiple_times(repeat_count, build_store, matric_str)
+    return _run_query_multiple_times(repeat, build_store, matric_str)
 
 
-def run_compressed_store_query(matric_str, repeat_count: int = 1) -> QueryEngine:
+def run_compressed_store_query(matric_str, repeat: int = 1) -> QueryEngine:
     def build_store() -> ColumnStore:
         columns = dict(
             year=UnsignedShortColumn("year"),
@@ -285,10 +285,10 @@ def run_compressed_store_query(matric_str, repeat_count: int = 1) -> QueryEngine
         )
         return ColumnStore(["compressed"], COLSTORE_DIR / "compressed", columns)
 
-    return _run_query_multiple_times(repeat_count, build_store, matric_str)
+    return _run_query_multiple_times(repeat, build_store, matric_str)
 
 
-def run_zone_map_basic_store_query(matric_str, repeat_count: int = 1) -> QueryEngine:
+def run_zone_map_basic_store_query(matric_str, repeat: int = 1) -> QueryEngine:
     def build_store() -> ColumnStore:
         columns = dict(
             year=UnsignedShortColumn("year", enable_zone_map=True),
@@ -307,10 +307,10 @@ def run_zone_map_basic_store_query(matric_str, repeat_count: int = 1) -> QueryEn
         )
         return ColumnStore(["zone map", "basic"], COLSTORE_DIR / "basic", columns)
 
-    return _run_query_multiple_times(repeat_count, build_store, matric_str)
+    return _run_query_multiple_times(repeat, build_store, matric_str)
 
 
-def run_indexed_basic_store_query(matric_str, repeat_count: int = 1) -> QueryEngine:
+def run_indexed_basic_store_query(matric_str, repeat: int = 1) -> QueryEngine:
     def build_store() -> ColumnStore:
         columns = dict(
             year=UnsignedShortColumn("year"),
@@ -327,11 +327,11 @@ def run_indexed_basic_store_query(matric_str, repeat_count: int = 1) -> QueryEng
         )
         return ColumnStore(["indexed", "basic"], COLSTORE_DIR / "basic", columns)
 
-    return _run_query_multiple_times(repeat_count, build_store, matric_str)
+    return _run_query_multiple_times(repeat, build_store, matric_str)
 
 
 def run_indexed_zone_map_compressed_store_query(
-    matric_str, repeat_count: int = 1
+    matric_str, repeat: int = 1
 ) -> QueryEngine:
     def build_store() -> ColumnStore:
         columns = dict(
@@ -357,4 +357,4 @@ def run_indexed_zone_map_compressed_store_query(
             columns,
         )
 
-    return _run_query_multiple_times(repeat_count, build_store, matric_str)
+    return _run_query_multiple_times(repeat, build_store, matric_str)

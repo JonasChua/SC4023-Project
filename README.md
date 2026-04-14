@@ -4,38 +4,80 @@
 
 This project implements an on-disk column store for Singapore HDB resale flat price data, supporting five progressively optimised variants. Each column in the relation is stored as a separate binary file so that queries only read the columns they actually need, avoiding unnecessary I/O on unrelated attributes.
 
-## Setup with uv
+## Key Files and Folders
 
-1. Install `uv` if it is not already available on your system.
-2. From the project root, create and use the virtual environment:
+- `main.py`: CLI entry point for running query and plotting workflows.
+- `store.py`: Core column store implementation.
+- `query.py`: Query execution pipeline and predicate evaluation and variant initialisation logic.
+- `column.py`: Column-level binary storage, reads, and block accounting.
+- `mapping.py`: Dictionary encoding and decoding helpers for compressed categorical columns.
+- `constants.py`: Shared constants such as schema details, paths, and data layout parameters.
+- `plot.py`: Benchmark visualisation utilities and chart generation.
+- `export.py`: Result export helpers for CSV/text outputs.
+- `data/raw/`: Input dataset source files (including `ResalePricesSingapore.csv`).
+- `data/store/basic/`: Persisted files for the baseline (uncompressed) column store.
+- `data/store/compressed/`: Persisted files and mapping tables for compressed variants.
+- `result/`: Generated benchmark outputs, scan results, and performance figures.
+- `result/ScanResult_*.csv`: CSV files containing the query results for each column store variant.
+- `result/ValidationResult.xlsx`: Excel file containing the query results for the validation query.
 
-   ```powershell
-   uv sync
-   ```
+## Before Running
 
-## Run Query with uv
+This project uses `uv` for dependency management and task execution. If you choose to not use `uv`, replace `uv run` with `python` in the commands below.
 
-Run the query workflow through `uv`:
+## Run Query
+
+Run the query workflow:
 
 ```powershell
 uv run main.py query
 ```
 
-You can also pass the available options from `main.py`, for example:
+Use `-m` or `--matric` to specify the matric number for the query (default: `A6626226B`):
 
 ```powershell
-uv run main.py query -m A6626226B -n 10 -s -r
+uv run main.py query -m A6626226B
 ```
 
-To run only the indexed + zone map + compressed experiment query and print the first 10 result rows in the terminal:
+Use `-n` or `--repeat` to specify how many times to run the query and average the timings (default: 1):
+
+```powershell
+uv run main.py query -n 1
+```
+
+Use `-r` or `--export-results` to export the query results to a `ScanResult_*.csv` file in the `result/` folder:
+
+```powershell
+uv run main.py query -r
+```
+
+Use `-s` or `--export-stats` to export the query statistics to text and CSV files in the `result/` folder:
+
+```powershell
+uv run main.py query -s
+```
+
+Use `-e` or `--experiment` to run only the indexed + zone map + compressed experiment query and print the first 10 result rows in the terminal:
 
 ```powershell
 uv run main.py query -e -m A6626226B
 ```
 
-## Run Plot with uv
+## Run Plot
 
-Run the plot workflow through `uv`:
+`matplotlib` and `pandas` are required to run the plotting workflow. If you have not installed these dependencies, you can do so with:
+
+```powershell
+uv sync
+```
+
+or without `uv`:
+
+```powershell
+pip install matplotlib pandas
+```
+
+Run the plot workflow:
 
 ```powershell
 uv run main.py plot
